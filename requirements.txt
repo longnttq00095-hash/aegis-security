@@ -1,2 +1,2 @@
-customtkinter>=5.2.2
-psutil>=6.0.0
+Flask>=3.0
+psutil>=6.0
