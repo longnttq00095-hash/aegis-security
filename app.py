@@ -1,4 +1,4 @@
-from flask import Flask, render_template_string, request
+from flask import Flask, render_template_string, request, jsonify
 import psutil
 import platform
 import socket
@@ -7,12 +7,12 @@ from datetime import datetime
 
 app = Flask(__name__)
 
-# =========================
-# SECURITY LOG STORAGE
-# =========================
-
 security_logs = []
 
+
+# =========================================================
+# SECURITY LOG
+# =========================================================
 
 def add_log(level, message):
     security_logs.insert(0, {
@@ -21,19 +21,21 @@ def add_log(level, message):
         "message": message
     })
 
-    # Giữ tối đa 50 log
     if len(security_logs) > 50:
         security_logs.pop()
 
 
-# =========================
-# SYSTEM DATA
-# =========================
+# =========================================================
+# SYSTEM MONITOR
+# =========================================================
 
-def get_data():
-    cpu = psutil.cpu_percent(interval=0.5)
-    memory = psutil.virtual_memory().percent
-    disk = psutil.disk_usage("/").percent
+def get_system_data():
+
+    cpu = psutil.cpu_percent(interval=None)
+
+    memory = psutil.virtual_memory()
+
+    disk = psutil.disk_usage("C:\\")
 
     hostname = socket.gethostname()
 
@@ -42,39 +44,89 @@ def get_data():
     except Exception:
         ip = "Unknown"
 
-    return cpu, memory, disk, hostname, ip
+    return {
+        "cpu": round(cpu, 1),
+
+        "memory_percent": round(memory.percent, 1),
+
+        "memory_used_gb": round(
+            memory.used / (1024 ** 3),
+            2
+        ),
+
+        "memory_total_gb": round(
+            memory.total / (1024 ** 3),
+            2
+        ),
+
+        "disk_percent": round(disk.percent, 1),
+
+        "disk_used_gb": round(
+            disk.used / (1024 ** 3),
+            2
+        ),
+
+        "disk_total_gb": round(
+            disk.total / (1024 ** 3),
+            2
+        ),
+
+        "hostname": hostname,
+
+        "ip": ip,
+
+        "os": platform.system(),
+
+        "platform": platform.platform(),
+
+        "cores": psutil.cpu_count(
+            logical=True
+        )
+    }
 
 
-def check_security(cpu, memory, disk):
-    alerts = 0
+def check_alerts(data):
 
-    if cpu >= 85:
-        add_log("WARNING", f"CPU usage is high: {cpu}%")
-        alerts += 1
+    alerts = []
 
-    if memory >= 85:
-        add_log("WARNING", f"Memory usage is high: {memory}%")
-        alerts += 1
+    if data["cpu"] >= 85:
+        alerts.append(
+            f"CPU usage is high: {data['cpu']}%"
+        )
 
-    if disk >= 90:
-        add_log("WARNING", f"Disk usage is high: {disk}%")
-        alerts += 1
+    if data["memory_percent"] >= 85:
+        alerts.append(
+            f"Memory usage is high: "
+            f"{data['memory_percent']}%"
+        )
 
-    if alerts == 0:
-        add_log("INFO", "System monitoring normal.")
+    if data["disk_percent"] >= 90:
+        alerts.append(
+            f"Disk usage is high: "
+            f"{data['disk_percent']}%"
+        )
 
     return alerts
 
 
+# =========================================================
+# NETWORK
+# =========================================================
+
 def get_interfaces():
+
     result = []
 
     try:
+
         interfaces = psutil.net_if_addrs()
 
         for name, addresses in interfaces.items():
+
             for address in addresses:
+
                 if address.family == socket.AF_INET:
+
                     result.append({
                         "name": name,
                         "ip": address.address
@@ -86,12 +138,13 @@ def get_interfaces():
     return result
 
 
-# =========================
-# HTML / CSS
-# =========================
+# =========================================================
+# HTML
+# =========================================================
 
 HTML = """
 <!DOCTYPE html>
+
 <html lang="vi">
 
 <head>
@@ -103,6 +156,7 @@ HTML = """
 
 <title>AEGIS SECURITY</title>
 
+
 <style>
 
 * {
@@ -111,111 +165,182 @@ HTML = """
     padding: 0;
 }
 
+
 body {
+
     background: #080b10;
+
     color: #e8edf5;
+
     font-family: Arial, sans-serif;
+
 }
+
 
 .layout {
+
     display: flex;
+
     min-height: 100vh;
+
 }
+
 
 .sidebar {
+
     width: 235px;
+
     background: #0d1117;
+
     border-right: 1px solid #202630;
+
     padding: 30px 18px;
+
 }
+
 
 .logo {
+
     font-size: 25px;
+
     font-weight: bold;
+
     letter-spacing: 1px;
+
 }
+
 
 .version {
+
     color: #7f8a99;
+
     font-size: 12px;
+
     margin-top: 6px;
+
     margin-bottom: 35px;
+
 }
 
+
 .menu {
+
     display: block;
+
     width: 100%;
+
     padding: 13px 15px;
+
     margin-bottom: 8px;
 
     color: #b9c2cf;
+
     text-decoration: none;
 
     border-radius: 8px;
+
     transition: 0.2s;
+
 }
+
 
 .menu:hover {
+
     background: #171d26;
+
     color: white;
+
 }
+
 
 .main {
+
     flex: 1;
+
     padding: 35px;
+
     overflow-x: auto;
+
 }
 
+
 .topbar {
+
     display: flex;
+
     justify-content: space-between;
+
     align-items: center;
 
     gap: 20px;
+
     margin-bottom: 30px;
+
 }
+
 
 h1 {
+
     font-size: 30px;
+
     margin-bottom: 7px;
+
 }
+
 
 .subtitle {
+
     color: #7f8a99;
+
     font-size: 14px;
+
 }
 
+
 .refresh {
+
     display: inline-block;
 
     background: #1f6feb;
+
     color: white;
 
     padding: 11px 18px;
 
     border-radius: 8px;
+
     text-decoration: none;
 
     font-weight: bold;
 
     border: none;
+
     cursor: pointer;
+
 }
+
 
 .refresh:hover {
+
     background: #388bfd;
+
 }
 
+
 .cards {
+
     display: grid;
 
     grid-template-columns:
         repeat(4, minmax(150px, 1fr));
 
     gap: 15px;
+
 }
 
+
 .card {
+
     background: #10151d;
 
     border: 1px solid #202630;
@@ -223,23 +348,45 @@ h1 {
     border-radius: 12px;
 
     padding: 22px;
+
 }
 
+
 .card-title {
+
     color: #8d98a8;
 
     font-size: 13px;
 
     margin-bottom: 12px;
+
 }
+
 
 .value {
+
     font-size: 28px;
+
     font-weight: bold;
+
 }
 
+
+.small-value {
+
+    color: #8994a4;
+
+    font-size: 13px;
+
+    margin-top: 7px;
+
+}
+
+
 .bar {
+
     width: 100%;
+
     height: 8px;
 
     background: #202630;
@@ -249,17 +396,25 @@ h1 {
     margin-top: 12px;
 
     overflow: hidden;
+
 }
 
+
 .bar-fill {
+
     height: 100%;
 
     background: #1f6feb;
 
     border-radius: 10px;
+
+    transition: width 0.5s ease;
+
 }
 
+
 .section {
+
     margin-top: 25px;
 
     background: #10151d;
@@ -269,14 +424,21 @@ h1 {
     border-radius: 12px;
 
     padding: 25px;
+
 }
+
 
 .section h2 {
+
     margin-bottom: 20px;
+
     font-size: 19px;
+
 }
 
+
 .row {
+
     display: flex;
 
     justify-content: space-between;
@@ -288,32 +450,53 @@ h1 {
     padding: 13px 0;
 
     border-bottom: 1px solid #202630;
+
 }
+
 
 .row:last-child {
+
     border-bottom: none;
+
 }
+
 
 .label {
+
     color: #8994a4;
+
 }
+
 
 .status {
+
     color: #3fb950;
+
     font-weight: bold;
+
 }
+
 
 .warning {
+
     color: #d29922;
+
     font-weight: bold;
+
 }
+
 
 .info {
+
     color: #58a6ff;
+
     font-weight: bold;
+
 }
 
+
 .connection {
+
     padding: 14px;
 
     margin-bottom: 9px;
@@ -323,9 +506,12 @@ h1 {
     border-radius: 8px;
 
     border: 1px solid #202630;
+
 }
 
+
 .log {
+
     padding: 15px;
 
     margin-bottom: 10px;
@@ -335,9 +521,12 @@ h1 {
     border: 1px solid #202630;
 
     border-radius: 8px;
+
 }
 
+
 .log-time {
+
     color: #6e7781;
 
     font-family: monospace;
@@ -345,13 +534,19 @@ h1 {
     font-size: 12px;
 
     margin-bottom: 6px;
+
 }
+
 
 .log-message {
+
     margin-top: 5px;
+
 }
 
+
 .upload-box {
+
     border: 1px dashed #394352;
 
     border-radius: 10px;
@@ -359,17 +554,23 @@ h1 {
     padding: 25px;
 
     margin-top: 20px;
+
 }
 
+
 .file-input {
+
     width: 100%;
 
     margin-bottom: 20px;
 
     color: #c9d1d9;
+
 }
 
+
 .hash-value {
+
     word-break: break-all;
 
     max-width: 70%;
@@ -381,52 +582,105 @@ h1 {
     font-size: 13px;
 
     color: #c9d1d9;
+
 }
 
+
+.live {
+
+    display: inline-flex;
+
+    align-items: center;
+
+    gap: 7px;
+
+    color: #3fb950;
+
+    font-size: 12px;
+
+    font-weight: bold;
+
+}
+
+
+.live-dot {
+
+    width: 8px;
+
+    height: 8px;
+
+    border-radius: 50%;
+
+    background: #3fb950;
+
+}
+
+
 .footer {
+
     margin-top: 30px;
 
     color: #596575;
 
     font-size: 12px;
+
 }
+
 
 @media (max-width: 900px) {
 
     .cards {
+
         grid-template-columns:
             repeat(2, 1fr);
+
     }
 
 }
 
+
 @media (max-width: 650px) {
 
     .sidebar {
+
         display: none;
+
     }
 
     .main {
+
         padding: 20px;
+
     }
 
     .cards {
+
         grid-template-columns: 1fr;
+
     }
 
     .topbar {
+
         align-items: flex-start;
+
         flex-direction: column;
+
     }
 
     .row {
+
         flex-direction: column;
+
         align-items: flex-start;
+
     }
 
     .hash-value {
+
         max-width: 100%;
+
         text-align: left;
+
     }
 
 }
@@ -437,6 +691,7 @@ h1 {
 
 
 <body>
+
 
 <div class="layout">
 
@@ -450,32 +705,39 @@ h1 {
 </div>
 
 <div class="version">
-SECURITY TOOLKIT V2.0
+SECURITY TOOLKIT V3.0
 </div>
+
 
 <a class="menu" href="/">
 🛡️ Dashboard
 </a>
 
+
 <a class="menu" href="/network">
 🌐 Network
 </a>
+
 
 <a class="menu" href="/hash">
 🔐 Hash Scanner
 </a>
 
+
 <a class="menu" href="/system">
 💻 System
 </a>
+
 
 <a class="menu" href="/logs">
 📋 Security Logs
 </a>
 
+
 <a class="menu" href="/about">
 ℹ️ About
 </a>
+
 
 </aside>
 
@@ -500,18 +762,24 @@ Python Cybersecurity Toolkit
 </div>
 
 
-{% if page != "about" %}
+{% if page == "dashboard" %}
 
-<a class="refresh" href="/">
-↻ Refresh
-</a>
+<div class="live">
+
+<span class="live-dot"></span>
+
+LIVE MONITORING
+
+</div>
 
 {% endif %}
 
 </div>
 
 
+<!-- ================================================= -->
 <!-- DASHBOARD -->
+<!-- ================================================= -->
 
 {% if page == "dashboard" %}
 
@@ -519,26 +787,36 @@ Python Cybersecurity Toolkit
 <div class="cards">
 
 
+<!-- CPU -->
+
 <div class="card">
 
 <div class="card-title">
 CPU
 </div>
 
-<div class="value">
+<div
+id="cpu-value"
+class="value"
+>
 {{ cpu }}%
 </div>
 
 <div class="bar">
 
-<div class="bar-fill"
-style="width: {{ cpu }}%">
+<div
+id="cpu-bar"
+class="bar-fill"
+style="width: {{ cpu }}%"
+>
 </div>
 
 </div>
 
 </div>
 
+
+<!-- RAM -->
 
 <div class="card">
 
@@ -546,41 +824,73 @@ style="width: {{ cpu }}%">
 MEMORY
 </div>
 
-<div class="value">
+<div
+id="memory-value"
+class="value"
+>
 {{ memory }}%
+</div>
+
+<div
+id="memory-detail"
+class="small-value"
+>
+{{ memory_used }} GB /
+{{ memory_total }} GB
 </div>
 
 <div class="bar">
 
-<div class="bar-fill"
-style="width: {{ memory }}%">
+<div
+id="memory-bar"
+class="bar-fill"
+style="width: {{ memory }}%"
+>
 </div>
 
 </div>
 
 </div>
 
+
+<!-- DISK -->
 
 <div class="card">
 
 <div class="card-title">
-DISK
+DISK C:
 </div>
 
-<div class="value">
+<div
+id="disk-value"
+class="value"
+>
 {{ disk }}%
+</div>
+
+<div
+id="disk-detail"
+class="small-value"
+>
+{{ disk_used }} GB /
+{{ disk_total }} GB
 </div>
 
 <div class="bar">
 
-<div class="bar-fill"
-style="width: {{ disk }}%">
+<div
+id="disk-bar"
+class="bar-fill"
+style="width: {{ disk }}%"
+>
 </div>
 
 </div>
 
 </div>
 
+
+<!-- ALERTS -->
 
 <div class="card">
 
@@ -588,29 +898,33 @@ style="width: {{ disk }}%">
 ALERTS
 </div>
 
-<div class="value">
+<div
+id="alerts-value"
+class="value"
+>
 {{ alerts }}
 </div>
 
+<div
+id="alerts-status"
+class="{% if alerts > 0 %}warning{% else %}status{% endif %}"
+>
+
 {% if alerts > 0 %}
-
-<div class="warning">
 RESOURCE WARNING
-</div>
-
 {% else %}
-
-<div class="status">
 SYSTEM NORMAL
-</div>
-
 {% endif %}
 
 </div>
 
+</div>
+
 
 </div>
 
+
+<!-- SYSTEM INFO -->
 
 <div class="section">
 
@@ -625,7 +939,7 @@ System Information
 Operating System
 </span>
 
-<span>
+<span id="os">
 {{ os }}
 </span>
 
@@ -638,7 +952,7 @@ Operating System
 Hostname
 </span>
 
-<span>
+<span id="hostname">
 {{ hostname }}
 </span>
 
@@ -651,7 +965,7 @@ Hostname
 Local IP
 </span>
 
-<span>
+<span id="ip">
 {{ ip }}
 </span>
 
@@ -664,7 +978,7 @@ Local IP
 Last Update
 </span>
 
-<span>
+<span id="update-time">
 {{ time }}
 </span>
 
@@ -673,6 +987,8 @@ Last Update
 
 </div>
 
+
+<!-- SECURITY STATUS -->
 
 <div class="section">
 
@@ -736,7 +1052,9 @@ ACTIVE
 </div>
 
 
+<!-- ================================================= -->
 <!-- NETWORK -->
+<!-- ================================================= -->
 
 {% elif page == "network" %}
 
@@ -829,7 +1147,9 @@ No IPv4 interfaces found.
 </div>
 
 
+<!-- ================================================= -->
 <!-- HASH -->
+<!-- ================================================= -->
 
 {% elif page == "hash" %}
 
@@ -949,7 +1269,9 @@ MD5
 {% endif %}
 
 
+<!-- ================================================= -->
 <!-- SYSTEM -->
+<!-- ================================================= -->
 
 {% elif page == "system" %}
 
@@ -963,14 +1285,20 @@ MD5
 CPU USAGE
 </div>
 
-<div class="value">
+<div
+id="system-cpu"
+class="value"
+>
 {{ cpu }}%
 </div>
 
 <div class="bar">
 
-<div class="bar-fill"
-style="width: {{ cpu }}%">
+<div
+id="system-cpu-bar"
+class="bar-fill"
+style="width: {{ cpu }}%"
+>
 </div>
 
 </div>
@@ -984,14 +1312,25 @@ style="width: {{ cpu }}%">
 MEMORY USAGE
 </div>
 
-<div class="value">
+<div
+id="system-memory"
+class="value"
+>
 {{ memory }}%
+</div>
+
+<div class="small-value">
+{{ memory_used }} GB /
+{{ memory_total }} GB
 </div>
 
 <div class="bar">
 
-<div class="bar-fill"
-style="width: {{ memory }}%">
+<div
+id="system-memory-bar"
+class="bar-fill"
+style="width: {{ memory }}%"
+>
 </div>
 
 </div>
@@ -1002,17 +1341,28 @@ style="width: {{ memory }}%">
 <div class="card">
 
 <div class="card-title">
-DISK USAGE
+DISK C: USAGE
 </div>
 
-<div class="value">
+<div
+id="system-disk"
+class="value"
+>
 {{ disk }}%
+</div>
+
+<div class="small-value">
+{{ disk_used }} GB /
+{{ disk_total }} GB
 </div>
 
 <div class="bar">
 
-<div class="bar-fill"
-style="width: {{ disk }}%">
+<div
+id="system-disk-bar"
+class="bar-fill"
+style="width: {{ disk }}%"
+>
 </div>
 
 </div>
@@ -1076,7 +1426,7 @@ Total RAM
 </span>
 
 <span>
-{{ total_ram }} GB
+{{ memory_total }} GB
 </span>
 
 </div>
@@ -1085,7 +1435,9 @@ Total RAM
 </div>
 
 
+<!-- ================================================= -->
 <!-- LOGS -->
+<!-- ================================================= -->
 
 {% elif page == "logs" %}
 
@@ -1151,7 +1503,9 @@ No security events recorded.
 </div>
 
 
+<!-- ================================================= -->
 <!-- ABOUT -->
+<!-- ================================================= -->
 
 {% elif page == "about" %}
 
@@ -1176,7 +1530,7 @@ Version
 </span>
 
 <span>
-2.0
+3.0
 </span>
 
 </div>
@@ -1221,8 +1575,8 @@ bảo mật cơ bản.
 
 
 <p>
-Security Logs ghi lại các sự kiện
-giám sát tài nguyên của hệ thống.
+V3 bổ sung hệ thống giám sát
+CPU, RAM và Disk realtime.
 </p>
 
 <br>
@@ -1243,7 +1597,7 @@ trên hệ thống mà bạn sở hữu hoặc
 
 <div class="footer">
 
-AEGIS SECURITY V2.0
+AEGIS SECURITY V3.0
 •
 Educational Cybersecurity Project
 
@@ -1254,62 +1608,278 @@ Educational Cybersecurity Project
 
 </div>
 
+
+<!-- ================================================= -->
+<!-- REALTIME JAVASCRIPT -->
+<!-- ================================================= -->
+
+{% if page == "dashboard" or page == "system" %}
+
+<script>
+
+async function updateSystem() {
+
+    try {
+
+        const response =
+            await fetch("/api/status");
+
+        const data =
+            await response.json();
+
+
+        // CPU
+
+        document.getElementById(
+            "cpu-value"
+        ).textContent =
+            data.cpu + "%";
+
+
+        document.getElementById(
+            "cpu-bar"
+        ).style.width =
+            data.cpu + "%";
+
+
+        // MEMORY
+
+        document.getElementById(
+            "memory-value"
+        ).textContent =
+            data.memory_percent + "%";
+
+
+        document.getElementById(
+            "memory-detail"
+        ).textContent =
+            data.memory_used_gb +
+            " GB / " +
+            data.memory_total_gb +
+            " GB";
+
+
+        document.getElementById(
+            "memory-bar"
+        ).style.width =
+            data.memory_percent + "%";
+
+
+        // DISK
+
+        document.getElementById(
+            "disk-value"
+        ).textContent =
+            data.disk_percent + "%";
+
+
+        document.getElementById(
+            "disk-detail"
+        ).textContent =
+            data.disk_used_gb +
+            " GB / " +
+            data.disk_total_gb +
+            " GB";
+
+
+        document.getElementById(
+            "disk-bar"
+        ).style.width =
+            data.disk_percent + "%";
+
+
+        // ALERTS
+
+        document.getElementById(
+            "alerts-value"
+        ).textContent =
+            data.alerts;
+
+
+        const alertStatus =
+            document.getElementById(
+                "alerts-status"
+            );
+
+
+        if (data.alerts > 0) {
+
+            alertStatus.textContent =
+                "RESOURCE WARNING";
+
+            alertStatus.className =
+                "warning";
+
+        } else {
+
+            alertStatus.textContent =
+                "SYSTEM NORMAL";
+
+            alertStatus.className =
+                "status";
+
+        }
+
+
+        // TIME
+
+        document.getElementById(
+            "update-time"
+        ).textContent =
+            data.time;
+
+
+    } catch (error) {
+
+        console.log(
+            "Monitoring error:",
+            error
+        );
+
+    }
+
+}
+
+
+setInterval(
+    updateSystem,
+    1000
+);
+
+</script>
+
+{% endif %}
+
+
 </body>
 
 </html>
 """
 
 
-# =========================
+# =========================================================
 # DASHBOARD
-# =========================
+# =========================================================
 
 @app.route("/")
 def dashboard():
 
-    cpu, memory, disk, hostname, ip = get_data()
+    data = get_system_data()
 
-    alerts = check_security(
-        cpu,
-        memory,
-        disk
-    )
+    alerts = check_alerts(data)
+
+    if alerts:
+
+        for alert in alerts:
+
+            add_log(
+                "WARNING",
+                alert
+            )
+
+    else:
+
+        add_log(
+            "INFO",
+            "System monitoring normal."
+        )
+
 
     return render_template_string(
+
         HTML,
 
         title="Security Dashboard",
 
         page="dashboard",
 
-        cpu=cpu,
+        cpu=data["cpu"],
 
-        memory=memory,
+        memory=data["memory_percent"],
 
-        disk=disk,
+        memory_used=data["memory_used_gb"],
 
-        alerts=alerts,
+        memory_total=data["memory_total_gb"],
 
-        hostname=hostname,
+        disk=data["disk_percent"],
 
-        ip=ip,
+        disk_used=data["disk_used_gb"],
 
-        os=platform.system(),
+        disk_total=data["disk_total_gb"],
+
+        alerts=len(alerts),
+
+        hostname=data["hostname"],
+
+        ip=data["ip"],
+
+        os=data["os"],
 
         time=datetime.now().strftime(
             "%Y-%m-%d %H:%M:%S"
         )
+
     )
 
 
-# =========================
+# =========================================================
+# API STATUS
+# =========================================================
+
+@app.route("/api/status")
+def api_status():
+
+    data = get_system_data()
+
+    alerts = check_alerts(data)
+
+
+    return jsonify({
+
+        "cpu": data["cpu"],
+
+        "memory_percent":
+            data["memory_percent"],
+
+        "memory_used_gb":
+            data["memory_used_gb"],
+
+        "memory_total_gb":
+            data["memory_total_gb"],
+
+        "disk_percent":
+            data["disk_percent"],
+
+        "disk_used_gb":
+            data["disk_used_gb"],
+
+        "disk_total_gb":
+            data["disk_total_gb"],
+
+        "alerts": len(alerts),
+
+        "hostname":
+            data["hostname"],
+
+        "ip":
+            data["ip"],
+
+        "time":
+            datetime.now().strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+
+    })
+
+
+# =========================================================
 # NETWORK
-# =========================
+# =========================================================
 
 @app.route("/network")
 def network():
 
-    cpu, memory, disk, hostname, ip = get_data()
+    data = get_system_data()
 
     try:
 
@@ -1335,15 +1905,9 @@ def network():
 
         page="network",
 
-        cpu=cpu,
+        hostname=data["hostname"],
 
-        memory=memory,
-
-        disk=disk,
-
-        hostname=hostname,
-
-        ip=ip,
+        ip=data["ip"],
 
         connections=connections,
 
@@ -1352,9 +1916,9 @@ def network():
     )
 
 
-# =========================
+# =========================================================
 # HASH SCANNER
-# =========================
+# =========================================================
 
 @app.route(
     "/hash",
@@ -1374,7 +1938,9 @@ def hash_scanner():
 
     if request.method == "POST":
 
-        file = request.files.get("file")
+        file = request.files.get(
+            "file"
+        )
 
 
         if not file:
@@ -1391,18 +1957,22 @@ def hash_scanner():
 
             try:
 
-                sha256_hash = hashlib.sha256()
+                sha256_hash =
+                    hashlib.sha256()
 
-                md5_hash = hashlib.md5()
+                md5_hash =
+                    hashlib.md5()
 
 
                 while True:
 
-                    chunk = file.stream.read(
-                        8192
-                    )
+                    chunk =
+                        file.stream.read(
+                            8192
+                        )
 
                     if not chunk:
+
                         break
 
 
@@ -1415,16 +1985,19 @@ def hash_scanner():
                     )
 
 
-                sha256 = sha256_hash.hexdigest()
+                sha256 =
+                    sha256_hash.hexdigest()
 
-                md5 = md5_hash.hexdigest()
+                md5 =
+                    md5_hash.hexdigest()
 
-                filename = file.filename
+                filename =
+                    file.filename
 
 
                 add_log(
                     "INFO",
-                    f"Hash calculated for file: {filename}"
+                    f"Hash calculated: {filename}"
                 )
 
 
@@ -1457,24 +2030,14 @@ def hash_scanner():
     )
 
 
-# =========================
+# =========================================================
 # SYSTEM
-# =========================
+# =========================================================
 
 @app.route("/system")
 def system():
 
-    cpu, memory, disk, hostname, ip = get_data()
-
-    total_ram = round(
-        psutil.virtual_memory().total
-        / (1024 ** 3),
-        2
-    )
-
-    cores = psutil.cpu_count(
-        logical=True
-    )
+    data = get_system_data()
 
 
     return render_template_string(
@@ -1485,30 +2048,32 @@ def system():
 
         page="system",
 
-        cpu=cpu,
+        cpu=data["cpu"],
 
-        memory=memory,
+        memory=data["memory_percent"],
 
-        disk=disk,
+        memory_used=data["memory_used_gb"],
 
-        hostname=hostname,
+        memory_total=data["memory_total_gb"],
 
-        ip=ip,
+        disk=data["disk_percent"],
 
-        os=platform.system(),
+        disk_used=data["disk_used_gb"],
 
-        platform=platform.platform(),
+        disk_total=data["disk_total_gb"],
 
-        cores=cores,
+        os=data["os"],
 
-        total_ram=total_ram
+        platform=data["platform"],
+
+        cores=data["cores"]
 
     )
 
 
-# =========================
-# SECURITY LOGS
-# =========================
+# =========================================================
+# LOGS
+# =========================================================
 
 @app.route("/logs")
 def logs():
@@ -1526,9 +2091,9 @@ def logs():
     )
 
 
-# =========================
+# =========================================================
 # ABOUT
-# =========================
+# =========================================================
 
 @app.route("/about")
 def about():
@@ -1544,15 +2109,15 @@ def about():
     )
 
 
-# =========================
+# =========================================================
 # RUN
-# =========================
+# =========================================================
 
 if __name__ == "__main__":
 
     app.run(
 
-        host="0.0.0.0",
+        host="127.0.0.1",
 
         port=5000,
 
